@@ -48,7 +48,7 @@ It normalizes the `- ` sequence in folder names when creating Linux staging path
 - `findmnt` from util-linux.
 - `fusermount3` (or `fusermount`) for safe stale-overlay cleanup.
 - `/dev/fuse` available to the logged-in user session.
-- The Windows partition mounted and readable. The script does not mount NTFS.
+- The Windows partition mounted and readable. The script does not mount NTFS itself; systemd can automount it as described below.
 - A working Xodus Nexus AppImage. The launcher defaults to `~/Applications/Xodus-Nexus-0.3.8-x86_64.AppImage`.
 
 SteamOS is an immutable system. Keep this project and its installed scripts under the home directory; install dependencies using a SteamOS-supported method and verify they survive system updates. The utility does not install system packages or change mount configuration.
@@ -85,6 +85,40 @@ XODUS_IMPORT_ROOT="$HOME/Games/Xodus Nexus/Windows GamePass" \
 ```
 
 Equivalent command-line options are `--windows-root PATH` and `--xodus-root PATH`.
+
+### Automatically mount the Windows drive on Bazzite
+
+The game and Xodus shortcuts cannot use the imported views until the Windows partition is mounted. To have systemd mount it on first access after every boot, add an automount entry to `/etc/fstab`. This requires root access. The `nofail` option lets Bazzite boot if the drive is unavailable, and `ro` keeps Linux from changing the Windows partition. The game overlays store Linux-side changes in their staging directories.
+
+Find the partition UUID and your numeric user and group IDs:
+
+```bash
+lsblk -f
+id -u
+id -g
+```
+
+Open `/etc/fstab` with `sudoedit /etc/fstab` and add one line, replacing the placeholders with the NTFS partition UUID, your Linux username, and the IDs returned above:
+
+```text
+UUID=<NTFS-UUID> /run/media/<username>/Data ntfs3 ro,nofail,x-systemd.automount,uid=<UID>,gid=<GID>,umask=022,x-systemd.device-timeout=10s 0 0
+```
+
+Then reload systemd and start the automount unit for the current session:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start "$(systemd-escape --path --suffix=automount "/run/media/$USER/Data")"
+```
+
+Verify it by accessing the game root and checking the mounted filesystem:
+
+```bash
+ls "/run/media/$USER/Data/XboxGames"
+findmnt -T "/run/media/$USER/Data/XboxGames"
+```
+
+The first access triggers the NTFS mount; subsequent launches reuse it. This Bazzite-specific setup is not automatically transferred to SteamOS, where the system partition and automount setup differ.
 
 If the Xodus AppImage is elsewhere or has a different versioned name, set `XODUS_APPIMAGE` in the launcher environment or edit the `app=` line in `scripts/xodus-nexus-gamepass-launcher`.
 
