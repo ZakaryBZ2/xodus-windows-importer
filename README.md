@@ -61,7 +61,6 @@ Copy the scripts into the user's local executable directory:
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/xodus-windows-gamepass.py "$HOME/.local/bin/xodus-windows-gamepass"
 install -m 755 scripts/xodus-nexus-gamepass-launcher "$HOME/.local/bin/xodus-nexus-gamepass-launcher"
-install -m 755 scripts/xodus-nexus-gamepass-game-launcher "$HOME/.local/bin/xodus-nexus-gamepass-game-launcher"
 ```
 
 By default, the scanner looks for games in:
@@ -154,23 +153,23 @@ The launcher runs `prepare`, then starts Xodus:
 
 Add this launcher as a non-Steam game and leave Proton compatibility disabled. If Steam's file chooser filters out shell scripts, add the Xodus AppImage first, then edit the shortcut's Target field to the launcher path above. The launcher continues to open Xodus even if preparation fails; it shows a desktop notification when available.
 
-FUSE mounts do not survive reboot. The launcher recreates them before Xodus opens. The Windows drive must already be mounted at the configured root; mount it through the desktop file manager first if it is not mounted automatically.
+FUSE mounts do not survive reboot. The systemd user service described below recreates them at login; the launcher also prepares them when it starts Xodus. The Windows drive must be available at the configured root, either through the systemd automount below or by mounting it manually.
 
-### Individual Xodus game shortcuts
+### Prepare game views for individual Steam shortcuts
 
-Xodus-generated per-game Steam shortcuts launch the AppImage with `--launch-game` directly. They bypass the launcher above, so an imported Windows game can fail with “The selected directory does not contain MicrosoftGame.config or appxmanifest.xml” when its FUSE `mount` view is not mounted.
+Xodus-generated per-game shortcuts launch the AppImage directly. They do not run `xodus-nexus-gamepass-launcher`, so the FUSE views must be prepared at login. Use a systemd user service; this also keeps Xodus's own `shortcuts/launch-game` file intact. Do not replace that Xodus-managed file: Xodus checks its profile marker when adding shortcuts.
 
-Install the game launcher from this repository, then update Xodus's shared game-shortcut script so every per-game shortcut prepares the views first:
+Install the supplied user service:
 
 ```bash
-cat > "$HOME/.config/xodus-nexus/shortcuts/launch-game" <<'EOF'
-#!/bin/sh
-exec "$HOME/.local/bin/xodus-nexus-gamepass-game-launcher" --nexus-profile "$HOME/.config/xodus-nexus" --launch-game "$@"
-EOF
-chmod +x "$HOME/.config/xodus-nexus/shortcuts/launch-game"
+mkdir -p "$HOME/.config/systemd/user"
+install -m 644 systemd/xodus-windows-gamepass-prepare.service \
+  "$HOME/.config/systemd/user/xodus-windows-gamepass-prepare.service"
+systemctl --user daemon-reload
+systemctl --user enable --now xodus-windows-gamepass-prepare.service
 ```
 
-This script is shared by Xodus-generated game shortcuts. If Xodus recreates it, apply this change again. The game launcher stops with a notification if preparation fails, rather than opening Xodus against an empty mount directory.
+The service starts at user login, accesses the Windows game root (triggering the systemd NTFS automount if configured), and prepares all imported views before the Steam shortcuts are launched. Check its result with `systemctl --user status xodus-windows-gamepass-prepare.service`.
 
 ## Deleted games and cleanup
 
@@ -185,5 +184,5 @@ To remove a staging setup manually, close Xodus and the game first, unmount that
 - The scanner expects a direct `Content` directory and one matching XVD file per game folder.
 - Some Xbox App titles may use a different package layout or container format and will be skipped.
 - Preparing files does not guarantee that a title will launch. Xodus/Wine compatibility, licensing, DRM, and anti-cheat support vary by game.
-- Mounting and preparation require the Windows drive to be available. The script does not configure automount.
+- Mounting and preparation require the Windows drive to be available. The script does not configure system-level NTFS automount; follow the Bazzite instructions above if needed.
 - No game content, AppImage binaries, or user-specific paths are included in this repository.

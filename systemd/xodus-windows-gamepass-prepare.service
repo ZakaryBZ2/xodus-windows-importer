@@ -1,0 +1,10 @@
+[Unit]
+Description=Prepare Windows Game Pass views for Xodus
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/xodus-windows-gamepass prepare
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
