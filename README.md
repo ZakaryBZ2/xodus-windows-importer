@@ -61,6 +61,7 @@ Copy the scripts into the user's local executable directory:
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/xodus-windows-gamepass.py "$HOME/.local/bin/xodus-windows-gamepass"
 install -m 755 scripts/xodus-nexus-gamepass-launcher "$HOME/.local/bin/xodus-nexus-gamepass-launcher"
+install -m 755 scripts/xodus-nexus-gamepass-game-launcher "$HOME/.local/bin/xodus-nexus-gamepass-game-launcher"
 ```
 
 By default, the scanner looks for games in:
@@ -120,6 +121,22 @@ The launcher runs `prepare`, then starts Xodus:
 Add this launcher as a non-Steam game and leave Proton compatibility disabled. If Steam's file chooser filters out shell scripts, add the Xodus AppImage first, then edit the shortcut's Target field to the launcher path above. The launcher continues to open Xodus even if preparation fails; it shows a desktop notification when available.
 
 FUSE mounts do not survive reboot. The launcher recreates them before Xodus opens. The Windows drive must already be mounted at the configured root; mount it through the desktop file manager first if it is not mounted automatically.
+
+### Individual Xodus game shortcuts
+
+Xodus-generated per-game Steam shortcuts launch the AppImage with `--launch-game` directly. They bypass the launcher above, so an imported Windows game can fail with “The selected directory does not contain MicrosoftGame.config or appxmanifest.xml” when its FUSE `mount` view is not mounted.
+
+Install the game launcher from this repository, then update Xodus's shared game-shortcut script so every per-game shortcut prepares the views first:
+
+```bash
+cat > "$HOME/.config/xodus-nexus/shortcuts/launch-game" <<'EOF'
+#!/bin/sh
+exec "$HOME/.local/bin/xodus-nexus-gamepass-game-launcher" --nexus-profile "$HOME/.config/xodus-nexus" --launch-game "$@"
+EOF
+chmod +x "$HOME/.config/xodus-nexus/shortcuts/launch-game"
+```
+
+This script is shared by Xodus-generated game shortcuts. If Xodus recreates it, apply this change again. The game launcher stops with a notification if preparation fails, rather than opening Xodus against an empty mount directory.
 
 ## Deleted games and cleanup
 
