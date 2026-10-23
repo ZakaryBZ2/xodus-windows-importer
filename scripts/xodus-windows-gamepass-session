@@ -1,0 +1,32 @@
+#!/bin/sh
+# Mount the configured Windows volume through UDisks, then prepare Xodus views.
+
+set -eu
+
+config="${XODUS_GAMEPASS_CONFIG:-$HOME/.config/xodus-windows-gamepass.conf}"
+if [ -r "$config" ]; then
+    set -a
+    . "$config"
+    set +a
+fi
+
+windows_root="${XODUS_WINDOWS_ROOT:-/run/media/$USER/Data/XboxGames}"
+mountpoint="${XODUS_WINDOWS_MOUNTPOINT:-${windows_root%/*}}"
+device="${XODUS_WINDOWS_DEVICE:-}"
+attempt=0
+
+while ! /usr/bin/findmnt --noheadings --mountpoint "$mountpoint" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 12 ]; then
+        echo "Windows volume did not mount at $mountpoint after 60 seconds." >&2
+        exit 1
+    fi
+    if [ -z "$device" ]; then
+        echo "Set XODUS_WINDOWS_DEVICE in $config to the Windows partition device or UUID path." >&2
+        exit 1
+    fi
+    /usr/bin/udisksctl mount --block-device "$device" --options ro || true
+    sleep 5
+done
+
+exec "$HOME/.local/bin/xodus-windows-gamepass" prepare --windows-root "$windows_root"

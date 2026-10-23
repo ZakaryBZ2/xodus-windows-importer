@@ -1,9 +1,9 @@
 [Unit]
-Description=Prepare Windows Game Pass views for Xodus
+Description=Mount Windows Game Pass drive read-only and prepare Xodus views
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/xodus-windows-gamepass prepare
+ExecStart=%h/.local/bin/xodus-windows-gamepass-session
 RemainAfterExit=yes
 
 [Install]

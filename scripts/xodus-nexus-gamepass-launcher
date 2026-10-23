@@ -1,9 +1,9 @@
 #!/bin/sh
-manager="${XODUS_GAMEPASS_MANAGER:-$HOME/.local/bin/xodus-windows-gamepass}"
-app="${XODUS_APPIMAGE:-$HOME/Applications/Xodus-Nexus-0.3.8-x86_64.AppImage}"
+manager="${XODUS_GAMEPASS_MANAGER:-$HOME/.local/bin/xodus-windows-gamepass-session}"
+app="${XODUS_APPIMAGE:-$HOME/Apps/Xodus-Nexus-0.3.11-x86_64.appimage}"
 if ! "$manager" prepare; then
     if command -v notify-send >/dev/null 2>&1; then
         notify-send --urgency=critical "Xodus Nexus" "Windows Game Pass views could not be prepared. Check that the game drive is mounted."
     fi
 fi
-exec "$app" "$@"
+exec "$app" --no-sandbox --ozone-platform=x11 "$@"

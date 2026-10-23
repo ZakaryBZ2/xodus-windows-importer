@@ -2,7 +2,7 @@
 
 A small Linux utility that exposes Xbox App / PC Game Pass installs already stored on a Windows NTFS partition to [Xodus Nexus](https://github.com/domsvoboda/xodus-nexus). It avoids copying the full game directory to the Linux filesystem.
 
-The utility was developed and used on Bazzite with Xodus Nexus 0.3.8. It is intended to be portable to SteamOS, but SteamOS-specific package availability, mount permissions, and AppImage/FUSE behavior must be checked on the target installation.
+The utility was first developed on Bazzite with Xodus Nexus 0.3.8. It was later restored and used on Anatase OS (Fedora-based) with Xodus Nexus 0.3.11 and Steam. SteamOS-specific package availability, mount permissions, and AppImage/FUSE behavior must still be checked on the target installation.
 
 ## What it creates
 
@@ -47,9 +47,10 @@ It normalizes the `- ` sequence in folder names when creating Linux staging path
 - `fuse-overlayfs`.
 - `findmnt` from util-linux.
 - `fusermount3` (or `fusermount`) for safe stale-overlay cleanup.
+- `udisksctl` if using the user-session mounting method below.
 - `/dev/fuse` available to the logged-in user session.
-- The Windows partition mounted and readable. The script does not mount NTFS itself; systemd can automount it as described below.
-- A working Xodus Nexus AppImage. The launcher defaults to `~/Applications/Xodus-Nexus-0.3.8-x86_64.AppImage`.
+- The Windows partition mounted and readable. The `xodus-windows-gamepass` manager does not mount NTFS itself; the optional session helper uses UDisks, or systemd can automount it as described below.
+- A working Xodus Nexus AppImage. The launcher defaults to `~/Apps/Xodus-Nexus-0.3.11-x86_64.appimage`; set `XODUS_APPIMAGE` for another location or version.
 
 SteamOS is an immutable system. Keep this project and its installed scripts under the home directory; install dependencies using a SteamOS-supported method and verify they survive system updates. The utility does not install system packages or change mount configuration.
 
@@ -60,6 +61,7 @@ Copy the scripts into the user's local executable directory:
 ```bash
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/xodus-windows-gamepass.py "$HOME/.local/bin/xodus-windows-gamepass"
+install -m 755 scripts/xodus-windows-gamepass-session "$HOME/.local/bin/xodus-windows-gamepass-session"
 install -m 755 scripts/xodus-nexus-gamepass-launcher "$HOME/.local/bin/xodus-nexus-gamepass-launcher"
 ```
 
@@ -85,6 +87,34 @@ XODUS_IMPORT_ROOT="$HOME/Games/Xodus Nexus/Windows GamePass" \
 
 Equivalent command-line options are `--windows-root PATH` and `--xodus-root PATH`.
 
+### Mount through UDisks at user login (Anatase OS and similar desktops)
+
+On Anatase OS, UDisks can mount the Windows NTFS partition read-only without editing `/etc/fstab` or changing the immutable OS deployment. The supplied `xodus-windows-gamepass-session` helper mounts the configured volume if it is not mounted yet, waits up to 60 seconds for it to become available, and then runs `prepare`.
+
+Find the NTFS partition UUID and set the mount paths. The example assumes the partition label is `Data` and the games are in `XboxGames`:
+
+```bash
+lsblk -f
+mkdir -p "$HOME/.config"
+cat > "$HOME/.config/xodus-windows-gamepass.conf" <<'EOF'
+XODUS_WINDOWS_DEVICE=/dev/disk/by-uuid/<NTFS-UUID>
+XODUS_WINDOWS_MOUNTPOINT=/run/media/<username>/Data
+XODUS_WINDOWS_ROOT=/run/media/<username>/Data/XboxGames
+EOF
+```
+
+Replace `<NTFS-UUID>` and `<username>` with the values for this computer. `XODUS_WINDOWS_DEVICE` may also be a device path such as `/dev/nvme0n1p4`. Keep the config file as plain `KEY=value` assignments; the session helper reads it for both systemd and Steam launches. Install and enable the user service:
+
+```bash
+mkdir -p "$HOME/.config/systemd/user"
+install -m 644 systemd/xodus-windows-gamepass-prepare.service \
+  "$HOME/.config/systemd/user/xodus-windows-gamepass-prepare.service"
+systemctl --user daemon-reload
+systemctl --user enable --now xodus-windows-gamepass-prepare.service
+```
+
+This starts at user login (after the desktop session begins), not before anyone logs in. It uses UDisks to mount the drive read-only. If the drive is unplugged or unavailable at login, run `~/.local/bin/xodus-windows-gamepass-session` after connecting it. For a system-wide mount before login or a true first-access automount, configure `/etc/fstab` as described below; that requires administrator privileges.
+
 ### Automatically mount the Windows drive on Bazzite
 
 The game and Xodus shortcuts cannot use the imported views until the Windows partition is mounted. To have systemd mount it on first access after every boot, add an automount entry to `/etc/fstab`. This requires root access. The `nofail` option lets Bazzite boot if the drive is unavailable, and `ro` keeps Linux from changing the Windows partition. The game overlays store Linux-side changes in their staging directories.
@@ -97,7 +127,7 @@ id -u
 id -g
 ```
 
-Open `/etc/fstab` with `sudoedit /etc/fstab` and add one line, replacing the placeholders with the NTFS partition UUID, your Linux username, and the IDs returned above:
+Open `/etc/fstab` with `sudoedit /etc/fstab` and add one line, replacing the placeholders with the NTFS partition UUID, your Linux username, and the IDs returned above. This example uses the kernel `ntfs3` driver; use the NTFS driver available on the target system if it differs:
 
 ```text
 UUID=<NTFS-UUID> /run/media/<username>/Data ntfs3 ro,nofail,x-systemd.automount,uid=<UID>,gid=<GID>,umask=022,x-systemd.device-timeout=10s 0 0
@@ -145,13 +175,13 @@ Choose the `mount` directory itself; its parent does not contain the manifests a
 
 ## Launch from Steam / Gaming Mode
 
-The launcher runs `prepare`, then starts Xodus:
+The launcher runs the session helper (which mounts the configured Windows volume if needed), then starts Xodus:
 
 ```text
 ~/.local/bin/xodus-nexus-gamepass-launcher
 ```
 
-Add this launcher as a non-Steam game and leave Proton compatibility disabled. If Steam's file chooser filters out shell scripts, add the Xodus AppImage first, then edit the shortcut's Target field to the launcher path above. The launcher continues to open Xodus even if preparation fails; it shows a desktop notification when available.
+Add the Xodus desktop entry or `xodus-nexus-gamepass-launcher` as a non-Steam game and leave Proton compatibility disabled. If adding the AppImage itself, edit the Steam shortcut's Target to the launcher path above. On Anatase OS, use the installed desktop entry rather than the AppImage's internal `AppRun` entry: Steam's Flatpak host launcher exposed a Wayland display that Electron could not connect to, and launching the raw AppImage also hit its SUID sandbox check. The launcher passes `--no-sandbox --ozone-platform=x11`; this combination was verified to keep Xodus running when started from Steam on Anatase OS. If Steam's file chooser filters out shell scripts, add the Xodus desktop entry and set the shortcut target to `~/.local/bin/xodus-nexus-gamepass-launcher`. The launcher continues to open Xodus even if preparation fails; it shows a desktop notification when available.
 
 FUSE mounts do not survive reboot. The systemd user service described below recreates them at login; the launcher also prepares them when it starts Xodus. The Windows drive must be available at the configured root, either through the systemd automount below or by mounting it manually.
 
@@ -159,7 +189,7 @@ FUSE mounts do not survive reboot. The systemd user service described below recr
 
 Xodus-generated per-game shortcuts launch the AppImage directly. They do not run `xodus-nexus-gamepass-launcher`, so the FUSE views must be prepared at login. Use a systemd user service; this also keeps Xodus's own `shortcuts/launch-game` file intact. Do not replace that Xodus-managed file: Xodus checks its profile marker when adding shortcuts.
 
-Install the supplied user service:
+Install the supplied user service (it mounts the configured drive through UDisks and then prepares the views):
 
 ```bash
 mkdir -p "$HOME/.config/systemd/user"
@@ -169,7 +199,30 @@ systemctl --user daemon-reload
 systemctl --user enable --now xodus-windows-gamepass-prepare.service
 ```
 
-The service starts at user login, accesses the Windows game root (triggering the systemd NTFS automount if configured), and prepares all imported views before the Steam shortcuts are launched. Check its result with `systemctl --user status xodus-windows-gamepass-prepare.service`.
+The service starts at user login and prepares all imported views before Steam shortcuts are launched. Check its result with `systemctl --user status xodus-windows-gamepass-prepare.service`.
+
+### Add Xodus to the app menu and Steam
+
+Create a user-level desktop entry that points to the launcher. This makes Xodus searchable in the desktop app menu and gives Steam a stable entry point:
+
+```bash
+mkdir -p "$HOME/.local/share/applications"
+cat > "$HOME/.local/share/applications/xodus-nexus.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Xodus Nexus
+Comment=Xbox-inspired Microsoft Store game launcher for Linux
+Exec=$HOME/.local/bin/xodus-nexus-gamepass-launcher %U
+Icon=applications-games
+Terminal=false
+Categories=Game;
+StartupNotify=true
+EOF
+desktop-file-validate "$HOME/.local/share/applications/xodus-nexus.desktop"
+update-desktop-database "$HOME/.local/share/applications"
+```
+
+Use the desktop entry's context-menu action **Add to Steam**. Leave Proton compatibility disabled. The launcher includes `--no-sandbox --ozone-platform=x11`, which was needed with Xodus 0.3.11 on Anatase OS: Steam's Flatpak host launch reported a Wayland display connection failure, and the raw AppImage also stopped at Electron's SUID sandbox check. If you use another desktop or Steam packaging, verify these flags there before changing them.
 
 ## Deleted games and cleanup
 
